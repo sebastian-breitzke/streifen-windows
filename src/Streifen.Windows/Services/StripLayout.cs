@@ -28,20 +28,12 @@ public sealed class StripLayout
         int totalSlices = screenClass.TotalSlices();
 
         double gap = _config.Gap;
-        double peek = _config.PeekWidth;
-        bool hasNeighbors = workspace.Windows.Count > 1;
-
-        double maxWidth = hasNeighbors
-            ? workArea.Width - 2 * gap - 2 * peek
-            : workArea.Width - 2 * gap;
 
         double x = gap;
         for (int i = 0; i < workspace.Windows.Count; i++)
         {
             var window = workspace.Windows[i];
             double targetWidth = workArea.Width * ((double)window.SliceCount / totalSlices) - 2 * gap;
-
-            targetWidth = Math.Min(targetWidth, maxWidth);
             targetWidth = Math.Max(targetWidth, 200);
 
             window.VirtualX = x;
@@ -107,7 +99,6 @@ public sealed class StripLayout
         var workArea = screen.WorkingArea;
         int totalSlices = screenClass.TotalSlices();
         double gap = _config.Gap;
-        double peek = _config.PeekWidth;
         const double tolerance = 5;
 
         var window = workspace.Windows[workspace.FocusIndex];
@@ -117,8 +108,8 @@ public sealed class StripLayout
         windowWidth = Math.Max(windowWidth, 200);
         double visualRight = visualLeft + windowWidth;
 
-        double leftBound = (workspace.FocusIndex > 0) ? peek + gap : gap;
-        double rightBound = workArea.Width - ((workspace.FocusIndex < workspace.Windows.Count - 1) ? peek + gap : gap);
+        double leftBound = gap;
+        double rightBound = workArea.Width - gap;
 
         if (visualLeft < leftBound - tolerance)
         {

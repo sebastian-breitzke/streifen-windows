@@ -14,6 +14,7 @@ public sealed class WorkspaceManager
     private readonly Workspace[] _workspaces;
     private int _activeWorkspaceId = 1;
     private WindowTracker? _windowTracker;
+    private long _lastLayoutTicks;
 
     /// <summary>Fired when active workspace changes — triggers layout.</summary>
     public event Action? ActiveWorkspaceChanged;
@@ -44,6 +45,9 @@ public sealed class WorkspaceManager
         _windowTracker = tracker;
     }
 
+    /// <summary>Record that a layout just happened — used for resize cooldown.</summary>
+    public void NotifyLayoutPerformed() => _lastLayoutTicks = Stopwatch.GetTimestamp();
+
     /// <summary>
     /// Initial sort of discovered windows into workspaces.
     /// Pinned apps get their first window placed in configured workspace.
@@ -54,6 +58,9 @@ public sealed class WorkspaceManager
 
         foreach (var window in windows)
         {
+            // Floating apps — not managed by workspaces
+            if (_config.FloatingApps.Contains(window.ProcessName)) continue;
+
             int targetWorkspace = 1;
 
             if (_config.PinnedApps.TryGetValue(window.ProcessName, out int pinnedWs) &&
@@ -81,6 +88,9 @@ public sealed class WorkspaceManager
 
     public void HandleWindowAdded(TrackedWindow window)
     {
+        // Floating apps — not managed
+        if (_config.FloatingApps.Contains(window.ProcessName)) return;
+
         int targetWorkspace = _activeWorkspaceId;
 
         if (_config.PinnedApps.TryGetValue(window.ProcessName, out int pinnedWs))
@@ -145,9 +155,16 @@ public sealed class WorkspaceManager
 
         var window = sourceWs.Windows[sourceIdx];
 
-        // Follow app: move window to current workspace instead of switching
-        if (allowWorkspaceSwitch &&
-            _config.FollowApps.Contains(window.ProcessName) &&
+        // Same workspace: just update focus index
+        if (sourceWs.Id == _activeWorkspaceId)
+        {
+            sourceWs.FocusIndex = sourceIdx;
+            WorkspaceContentChanged?.Invoke();
+            return;
+        }
+
+        // Follow app: always pull to current workspace, even from internal focus events
+        if (_config.FollowApps.Contains(window.ProcessName) &&
             sourceWs.Id != _activeWorkspaceId)
         {
             sourceWs.Remove(hwnd);
@@ -159,31 +176,23 @@ public sealed class WorkspaceManager
             return;
         }
 
-        // Same workspace: just update focus index
-        if (sourceWs.Id == _activeWorkspaceId)
+        // Don't switch workspaces unless explicitly allowed (Alt+Tab, taskbar click).
+        // Internal focus events are too noisy — browser popups, autocomplete etc.
+        if (!allowWorkspaceSwitch) return;
+
+        // Stale focus: prefer local window of same app
+        var localWindow = ActiveWorkspace.Windows
+            .FirstOrDefault(w => w.ProcessName.Equals(window.ProcessName, StringComparison.OrdinalIgnoreCase));
+
+        if (localWindow != null)
         {
-            sourceWs.FocusIndex = sourceIdx;
+            ActiveWorkspace.FocusIndex = ActiveWorkspace.IndexOf(localWindow.Hwnd);
             WorkspaceContentChanged?.Invoke();
             return;
         }
 
-        // Different workspace
-        if (allowWorkspaceSwitch)
-        {
-            // Stale focus: prefer local window of same app
-            var localWindow = ActiveWorkspace.Windows
-                .FirstOrDefault(w => w.ProcessName.Equals(window.ProcessName, StringComparison.OrdinalIgnoreCase));
-
-            if (localWindow != null)
-            {
-                ActiveWorkspace.FocusIndex = ActiveWorkspace.IndexOf(localWindow.Hwnd);
-                WorkspaceContentChanged?.Invoke();
-                return;
-            }
-
-            SwitchToWorkspace(sourceWs.Id);
-            sourceWs.FocusIndex = sourceIdx;
-        }
+        SwitchToWorkspace(sourceWs.Id);
+        sourceWs.FocusIndex = sourceIdx;
     }
 
     // ---- Manual resize snap ----
@@ -194,6 +203,9 @@ public sealed class WorkspaceManager
     /// </summary>
     public void HandleManualResize(IntPtr hwnd)
     {
+        // Ignore resizes triggered by our own layout (cooldown 500ms)
+        if (Stopwatch.GetTimestamp() - _lastLayoutTicks < Stopwatch.Frequency / 2) return;
+
         var (ws, idx) = FindWindow(hwnd);
         if (ws == null) return;
 
@@ -235,6 +247,8 @@ public sealed class WorkspaceManager
         target.IsVisible = true;
 
         ActiveWorkspaceChanged?.Invoke();
+        RaiseFloatingWindows();
+        ScheduleOffscreenSweep();
         StateChanged?.Invoke();
     }
 
@@ -318,6 +332,9 @@ public sealed class WorkspaceManager
     {
         foreach (var window in ws.Windows)
         {
+            // Skip already-parked windows
+            if (window.Frame.Left == -32000) continue;
+
             NativeMethods.SetWindowPos(window.Hwnd, IntPtr.Zero, -32000, -32000, 0, 0,
                 NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOZORDER | NativeMethods.SWP_NOACTIVATE);
         }
@@ -335,6 +352,9 @@ public sealed class WorkspaceManager
         {
             foreach (var window in ws.Windows)
             {
+                // Floating apps — skip
+                if (_config.FloatingApps.Contains(window.ProcessName)) continue;
+
                 if (NativeMethods.IsWindow(window.Hwnd))
                 {
                     NativeMethods.SetWindowPos(window.Hwnd, IntPtr.Zero,
@@ -354,6 +374,59 @@ public sealed class WorkspaceManager
             if (idx >= 0) return (ws, idx);
         }
         return (null, -1);
+    }
+
+    /// <summary>
+    /// Force-park all windows on inactive workspaces. Retries multiple times
+    /// because some apps (Ghostty, Zen, Teams, Edge) silently ignore
+    /// SetWindowPos when they are not the frontmost app.
+    /// </summary>
+    private void ScheduleOffscreenSweep()
+    {
+        int[] delays = [100, 300, 800];
+        foreach (var delay in delays)
+        {
+            var captured = delay;
+            System.Windows.Application.Current?.Dispatcher.BeginInvoke(
+                System.Windows.Threading.DispatcherPriority.Background,
+                async () =>
+                {
+                    await System.Threading.Tasks.Task.Delay(captured);
+                    _windowTracker?.BeginProgrammaticUpdate();
+                    foreach (var ws in _workspaces)
+                    {
+                        if (ws.IsVisible) continue;
+                        foreach (var window in ws.Windows)
+                        {
+                            // Check actual position — re-park if still on-screen
+                            NativeMethods.GetWindowRect(window.Hwnd, out var rect);
+                            if (rect.Left > -30000)
+                            {
+                                NativeMethods.SetWindowPos(window.Hwnd, IntPtr.Zero,
+                                    -32000, -32000, 0, 0,
+                                    NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOZORDER | NativeMethods.SWP_NOACTIVATE);
+                            }
+                        }
+                    }
+                    _windowTracker?.EndProgrammaticUpdate();
+                });
+        }
+    }
+
+    /// <summary>
+    /// Raise all floating app windows so they stay on top after workspace switches.
+    /// </summary>
+    private void RaiseFloatingWindows()
+    {
+        if (_windowTracker == null) return;
+        foreach (var window in _windowTracker.AllWindows)
+        {
+            if (_config.FloatingApps.Contains(window.ProcessName) &&
+                NativeMethods.IsWindow(window.Hwnd))
+            {
+                NativeMethods.BringWindowToTop(window.Hwnd);
+            }
+        }
     }
 
     private static void Log(string message)

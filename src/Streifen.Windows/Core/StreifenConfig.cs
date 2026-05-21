@@ -3,7 +3,6 @@ namespace Streifen.Windows.Core;
 public class StreifenConfig
 {
     public double Gap { get; set; } = 10;
-    public double PeekWidth { get; set; } = 60;
     public AppSize DefaultSize { get; set; } = AppSize.L;
 
     /// <summary>Process name → workspace ID (1-9). Only first window of each app goes there.</summary>
@@ -13,7 +12,12 @@ public class StreifenConfig
     public HashSet<string> FollowApps { get; set; } = new(StringComparer.OrdinalIgnoreCase)
     {
         "explorer",
-        "calc"
+    };
+
+    /// <summary>Floating apps: tracked but not in strip layout, always visible, survive workspace switches.</summary>
+    public HashSet<string> FloatingApps { get; set; } = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "calc",
     };
 
     /// <summary>Process name → default T-shirt size.</summary>
@@ -41,8 +45,7 @@ public class StreifenConfig
         ["OUTLOOK"] = AppSize.M,
         ["slack"] = AppSize.M,
 
-        // Small tools
-        ["calc"] = AppSize.XS,
+        // Calculator is floating (see FloatingApps)
 
         // File manager
         ["explorer"] = AppSize.S,

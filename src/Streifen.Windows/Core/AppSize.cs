@@ -32,7 +32,7 @@ public static class AppSizeExtensions
 
         (AppSize.L, ScreenClass.Laptop) => 4,
         (AppSize.L, ScreenClass.Desktop) => 3,
-        (AppSize.L, ScreenClass.Ultrawide) => 4,
+        (AppSize.L, ScreenClass.Ultrawide) => 3,
 
         (AppSize.XL, ScreenClass.Laptop) => 4,
         (AppSize.XL, ScreenClass.Desktop) => 4,

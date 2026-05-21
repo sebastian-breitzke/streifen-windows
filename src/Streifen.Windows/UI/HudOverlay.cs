@@ -10,7 +10,7 @@ namespace Streifen.Windows.UI;
 /// <summary>
 /// Transient HUD overlay for action feedback.
 /// Shows workspace number, slice bar, app defaults, move/reorder feedback.
-/// Appears for 0.6s then fades over 0.25s.
+/// Fixed 280x120 panel. Appears for 0.8s then fades over 0.3s.
 /// Adaptive light/dark mode. Brand colors from macOS version.
 /// </summary>
 public sealed class HudOverlay
@@ -28,8 +28,10 @@ public sealed class HudOverlay
     private static readonly Color Purple = (Color)ColorConverter.ConvertFromString("#9B82B5")!;
     private static readonly Color Mint = (Color)ColorConverter.ConvertFromString("#7DC9A7")!;
 
-    private static readonly TimeSpan ShowDuration = TimeSpan.FromMilliseconds(600);
-    private static readonly TimeSpan FadeDuration = TimeSpan.FromMilliseconds(250);
+    private const double PanelWidth = 280;
+    private const double PanelHeight = 120;
+    private static readonly TimeSpan ShowDuration = TimeSpan.FromMilliseconds(800);
+    private static readonly TimeSpan FadeDuration = TimeSpan.FromMilliseconds(300);
 
     public HudOverlay()
     {
@@ -98,7 +100,7 @@ public sealed class HudOverlay
 
         var borderColor = isDark
             ? Color.FromArgb(90, accent.R, accent.G, accent.B)
-            : Color.FromRgb(0xE0, 0xE0, 0xE0);
+            : Color.FromArgb(64, accent.R, accent.G, accent.B);
 
         _panel!.Background = new SolidColorBrush(bgColor);
         _panel.BorderBrush = new SolidColorBrush(borderColor);
@@ -112,15 +114,16 @@ public sealed class HudOverlay
         _secondaryLabel.Visibility = string.IsNullOrEmpty(secondary) ? Visibility.Collapsed : Visibility.Visible;
 
         _window!.Opacity = 1;
+        _window.Width = PanelWidth;
+        _window.Height = PanelHeight;
         _window.Show();
 
-        // Position: centered, slightly above center
+        // Fixed position: center-top area of managed screen
         var (_, screen) = ScreenClassDetector.Detect();
         var workArea = screen.WorkingArea;
 
-        _window.UpdateLayout();
-        _window.Left = workArea.Left + (workArea.Width - _window.ActualWidth) / 2;
-        _window.Top = workArea.Top + (workArea.Height - _window.ActualHeight) / 2 - workArea.Height * 0.1;
+        _window.Left = workArea.Left + (workArea.Width - PanelWidth) / 2;
+        _window.Top = workArea.Top + (workArea.Height - PanelHeight) / 2 - workArea.Height * 0.15;
 
         _hideTimer!.Start();
     }
@@ -156,8 +159,8 @@ public sealed class HudOverlay
         _panel = new Border
         {
             CornerRadius = new CornerRadius(16),
-            BorderThickness = new Thickness(1),
-            Padding = new Thickness(48, 32, 48, 32),
+            BorderThickness = new Thickness(4.5),
+            Padding = new Thickness(16, 0, 16, 0),
             Child = stack,
             Effect = new System.Windows.Media.Effects.DropShadowEffect
             {
@@ -177,7 +180,9 @@ public sealed class HudOverlay
             ShowInTaskbar = false,
             ShowActivated = false,
             IsHitTestVisible = false,
-            SizeToContent = SizeToContent.WidthAndHeight,
+            SizeToContent = SizeToContent.Manual,
+            Width = PanelWidth,
+            Height = PanelHeight,
             Content = _panel
         };
     }

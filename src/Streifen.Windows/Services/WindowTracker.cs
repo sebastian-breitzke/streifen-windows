@@ -87,6 +87,8 @@ public sealed class WindowTracker : IDisposable
                 break;
 
             case NativeMethods.EVENT_OBJECT_DESTROY:
+                // Allow destroy even during programmatic updates —
+                // window closures during layout must not be silently dropped.
                 HandleWindowDestroyed(hwnd);
                 break;
 
@@ -129,8 +131,9 @@ public sealed class WindowTracker : IDisposable
 
     private void HandleWindowCreated(IntPtr hwnd)
     {
-        if (IsUpdating || _windows.ContainsKey(hwnd))
+        if (_windows.ContainsKey(hwnd))
             return;
+        if (IsUpdating) return;
 
         uint pid = NativeMethods.GetProcessId(hwnd);
         if (!_recentlyLaunchedPids.Contains(pid))

@@ -67,6 +67,17 @@ public sealed class TrayIcon : IDisposable
             }
         };
 
+        var restartItem = menu.Items.Add("Restart Streifen");
+        restartItem.Click += (_, _) =>
+        {
+            var exePath = Environment.ProcessPath ?? System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName;
+            if (exePath != null)
+            {
+                System.Diagnostics.Process.Start(exePath);
+            }
+            _app.RequestShutdown();
+        };
+
         menu.Items.Add(new ToolStripSeparator());
 
         var quitItem = menu.Items.Add("Quit Streifen");

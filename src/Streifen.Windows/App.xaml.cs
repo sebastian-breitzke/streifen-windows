@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Linq;
 using System.Windows;
 using Microsoft.Win32;
 using Streifen.Windows.Core;
@@ -67,8 +68,10 @@ public partial class App : Application
         // 2. Wire workspace manager
         _workspaceManager.SetWindowTracker(_windowTracker);
 
-        // 3. Discover windows (no events wired yet)
-        var discovered = _windowTracker.DiscoverAll();
+        // 3. Discover windows (no events wired yet), exclude floating apps
+        var discovered = _windowTracker.DiscoverAll()
+            .Where(w => !_config.FloatingApps.Contains(w.ProcessName))
+            .ToList();
 
         // 4. Try restore state, fall back to initial sort
         if (!_stateManager.TryRestore(_workspaceManager, discovered))
@@ -237,6 +240,7 @@ public partial class App : Application
     private void LayoutAndActivate()
     {
         _windowTracker.BeginProgrammaticUpdate();
+        _workspaceManager.NotifyLayoutPerformed();
 
         var ws = _workspaceManager.ActiveWorkspace;
         _stripLayout.EnsureWindowVisible(ws);
@@ -244,7 +248,13 @@ public partial class App : Application
         ActivateFocusedWindow();
         _trayIcon?.UpdateWorkspaceIndicator(_workspaceManager.ActiveWorkspaceId);
 
-        _windowTracker.EndProgrammaticUpdate();
+        // Delay re-enabling observer to let Win32 notifications drain
+        Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background,
+            async () =>
+            {
+                await Task.Delay(50);
+                _windowTracker.EndProgrammaticUpdate();
+            });
     }
 
     private void ActivateFocusedWindow()
@@ -252,11 +262,23 @@ public partial class App : Application
         var ws = _workspaceManager.ActiveWorkspace;
         if (ws.Windows.Count == 0) return;
 
-        // Raise ALL workspace windows first (Electron apps need this)
+        // Raise each window and re-apply position.
+        // Apps like Ghostty ignore SetWindowPos on non-raised windows,
+        // so we raise first, then re-confirm the target position.
         foreach (var window in ws.Windows)
         {
             if (Win32.NativeMethods.IsWindow(window.Hwnd))
+            {
                 Win32.NativeMethods.BringWindowToTop(window.Hwnd);
+                // Re-apply position for windows that are on-screen
+                if (window.Frame.Left > -30000)
+                {
+                    Win32.NativeMethods.SetWindowPos(window.Hwnd, IntPtr.Zero,
+                        window.Frame.Left, window.Frame.Top,
+                        window.Frame.Width, window.Frame.Height,
+                        Win32.NativeMethods.SWP_NOZORDER | Win32.NativeMethods.SWP_NOACTIVATE);
+                }
+            }
         }
 
         var focused = ws.FocusedWindow;

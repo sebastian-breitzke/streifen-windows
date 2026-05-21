@@ -4,14 +4,20 @@ Windows port of [Streifen](https://streifen.app), a horizontal scrolling window 
 
 ## macOS Reference
 
-Ported from macOS source at commit [`a55f808`](https://github.com/sbreitzke/streifen/commit/a55f808) (2026-03-18).
+Ported from macOS source at commit [`9f871b8`](https://github.com/sebastian-breitzke/streifen/commit/9f871b8) (2026-03-22).
 
 Key features synced:
 - Slice-based grid system (replaced widthRatio)
-- HUD overlay with brand colors, light/dark adaptive
-- Manual resize snap to slice grid
+- HUD overlay with brand colors, light/dark adaptive, fixed 280x120 size, thicker border
+- Manual resize snap to slice grid with 500ms cooldown against layout-triggered resize loops
 - State persistence after every structural change
 - Removed cached resizability (Rider/JetBrains fix)
+- Removed peek width edge reservation
+- Floating apps: always visible, not part of strip layout, survive workspace switches
+- Multi-retry offscreen sweep (100/300/800ms) for stubborn apps
+- Position re-apply after raise (Ghostty fix)
+- Follow apps always pull to current workspace (even from internal focus events)
+- Restart menu item in system tray
 
 ## Concept
 
